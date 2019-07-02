@@ -1,21 +1,32 @@
 #/usr/bin/python
 import glob
 import time
-import ipyparallel as ipp
-# need to run ipcluster start
-# before using this code!
 
+import ipyparallel as ipp
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
+
+# need to run ipcluster start
+# before using this code!
 
 
 def load_file(path):
     """
     Loads an IGETS data product file at path
     """
-    data = np.genfromtxt(path, skip_header=30, skip_footer=2,
-                         invalid_raise=False, usecols=(0, 1, 2))
+    data = np.genfromtxt(path,
+                         skip_header=30,
+                         skip_footer=2,
+                         invalid_raise=False,
+                         usecols=(0, 1, 2))
+    # pathalogical lines exist two ways, either they start with a nan
+    # or with a number like 77777777 or 99999999. filter both
+    #
+    data = data[~np.isnan(data[:, 0])]
+    data = data[~np.isclose(data[:, 0], 77777777)]
+    data = data[~np.isclose(data[:, 0], 88888888)]
+    data = data[~np.isclose(data[:, 0], 99999999)]
     # pull out just the year/month/day column and the hour/minute/second column
     # and cast them to strings (int as an intermediate to remove spurious
     # decimals
@@ -33,14 +44,13 @@ def load_file(path):
 
     ymd = ["-".join(i) for i in zip(years, months, days)]
     hms = [":".join(i) for i in zip(hours, minutes, seconds)]
-    import ipdb; ipdb.set_trace()
-    try:
-        timestamps = np.array(["T".join(i) for i in zip(ymd, hms)],
+    #try:
+    timestamps = np.array(["T".join(i) for i in zip(ymd, hms)],
                           dtype=np.datetime64)
-    except ValueError:
-        print("something wrong with date.")
-        print(path)
-        return path
+    #except ValueError:
+    #    print("something wrong with date.")
+    #    print(path)
+    #    return path, data
 
     result = np.column_stack((timestamps.astype(np.float), data[:, 2]))
 
@@ -71,19 +81,20 @@ def do_fft_on_data(data):
 def main(level=3, basedir="./"):
     tstart = time.time()
     if level == 3:
-        files = glob.glob(basedir + "**/Level3/**/*RESMIN*.ggp", recursive=True)
+        files = glob.glob(basedir + "**/Level3/**/*RESMIN*.ggp",
+                          recursive=True)
     elif level == 2:
-        files = glob.glob(basedir + "**/Level2/**/*CORMIN*.ggp", recursive=True)
+        files = glob.glob(basedir + "**/Level2/**/*CORMIN*.ggp",
+                          recursive=True)
     # interpolate results to add them
     # load the files in parallel
     print("start loading files")
     rc = ipp.Client()
     dview = rc[:]
 
-    #ffts = dview.map_sync(load_file, files)
-    ffts = list(map(load_file, files))
+    ffts = dview.map_sync(load_file, files)
+    # ffts = list(map(load_file, files))
     print("done loading files", time.time() - tstart)
-    return ffts
 
     # the nyquist frequency
     max_freq = 1 / (3 * 60)
@@ -110,5 +121,3 @@ def plot_results(freqs, fft):
     plt.plot(periods, fft)
     plt.ylabel("Acceleration / Hz (in nm/s)")
     plt.xlabel("Period (in Minutes)")
-
-
