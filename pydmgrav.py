@@ -15,11 +15,17 @@ def load_file(path):
     """
     Loads an IGETS data product file at path
     """
-    data = np.genfromtxt(path,
-                         skip_header=30,
-                         skip_footer=2,
-                         invalid_raise=False,
-                         usecols=(0, 1, 2))
+    try:
+        data = np.genfromtxt(path,
+                             skip_header=30,
+                             skip_footer=2,
+                             invalid_raise=False,
+                             usecols=(0, 1, 2),
+                             encoding='latin1')
+    except UnicodeDecodeError:
+        return ("Unicode Issue", path)
+        # raise ValueError("path is  " + path)
+
     # pathalogical lines exist two ways, either they start with a nan
     # or with a number like 77777777 or 99999999. filter both
     #
@@ -44,13 +50,15 @@ def load_file(path):
 
     ymd = ["-".join(i) for i in zip(years, months, days)]
     hms = [":".join(i) for i in zip(hours, minutes, seconds)]
-    #try:
-    timestamps = np.array(["T".join(i) for i in zip(ymd, hms)],
-                          dtype=np.datetime64)
-    #except ValueError:
-    #    print("something wrong with date.")
-    #    print(path)
-    #    return path, data
+    try:
+        timestamps = np.array(["T".join(i) for i in zip(ymd, hms)],
+                              dtype=np.datetime64)
+    except ValueError:
+        print("something wrong with date.")
+        print(path)
+        # raise ValueError("path is: " + path)
+        print("Skipping this file...")
+        return ("date issue with", path)
 
     result = np.column_stack((timestamps.astype(np.float), data[:, 2]))
 
@@ -95,6 +103,18 @@ def main(level=3, basedir="./"):
     ffts = dview.map_sync(load_file, files)
     # ffts = list(map(load_file, files))
     print("done loading files", time.time() - tstart)
+
+    # remove any failed files
+    
+    print("Failed Files:")
+    failed_files = [i for i in ffts if type(i[0]) is str]
+    for i in failed_files:
+        print(i)
+    # remove the failed files
+    ffts[:] = [i for i in ffts if type(i[0]) is not str]
+
+    [print(i) for i in ffts if type(i[0]) is str]
+    ffts = np.array([i for i in ffts if i is not None])
 
     # the nyquist frequency
     max_freq = 1 / (3 * 60)
