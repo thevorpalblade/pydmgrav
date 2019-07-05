@@ -21,7 +21,8 @@ def load_file(path):
                              skip_footer=2,
                              invalid_raise=False,
                              usecols=(0, 1, 2),
-                             encoding='latin1')
+                             encoding='latin1',
+                             delimiter=(9, 6, 10))
     except UnicodeDecodeError:
         return ("Unicode Issue", path)
         # raise ValueError("path is  " + path)
@@ -61,7 +62,6 @@ def load_file(path):
         return ("date issue with", path)
 
     result = np.column_stack((timestamps.astype(np.float), data[:, 2]))
-
     return do_fft_on_data(result)
 
 
@@ -115,7 +115,6 @@ def main(level=3, basedir="./"):
 
     [print(i) for i in ffts if type(i[0]) is str]
     ffts = np.array([i for i in ffts if i is not None])
-
     # the nyquist frequency
     max_freq = 1 / (3 * 60)
     # min freq corresponds to a 200 min period
