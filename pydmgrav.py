@@ -6,6 +6,7 @@ import ipyparallel as ipp
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
+from scipy.optimize import curve_fit
 
 # need to run ipcluster start
 # before using this code!
@@ -65,24 +66,41 @@ def load_file(path):
     return do_fft_on_data(result)
 
 
-def do_fft_on_data(data):
+def do_fft_on_data(data, max_freq=1 / 180, min_freq=1 / 172800):
     timestep = data[1, 0] - data[0, 0]
     freqs = np.fft.rfftfreq(len(data), timestep)
-    fft = np.fft.rfft(data[:, 1])
+    fft = np.abs(np.fft.rfft(data[:, 1]))
+
+    # remove the baseline
+    # below this frequency we run into the tides
+    bl_tidal_cutoff = 3.655e-5
+
+    one_on_f = lambda f, A, B, C, D, y0: A / f + B / f**2 + C / f**3 + D / f ** 4 +  y0
+    tide_mask = freqs > bl_tidal_cutoff
+    # plt.plot(freqs[tide_mask], fft[tide_mask])
+    # fit only the non-tidal region
+    fit_results = curve_fit(one_on_f,
+                            freqs[tide_mask],
+                            fft[tide_mask])
+    print(fit_results[0])
+    # subtract the baseline
+    fft = fft - one_on_f(freqs, *fit_results[0])
+    # plt.plot(freqs[tide_mask], fft[tide_mask])
+    # plt.pause(.5)
+    # plt.clf()
 
     interp_spectra = interp1d(freqs, np.abs(fft))
 
     # the nyquist frequency
-    max_freq = 1 / (3 * 60)
+    #max_freq = 1 / (3 * 60)
     # min freq corresponds to a 200 min period
-    min_freq = 1 / (200 * 60)
+    #min_freq = 1 / (200 * 60)
     # frequency step, use 2x the highest frequency step ive seen
     # to avoid aliasing
     interp_freq_step = 1.87e-07
     new_freqs = np.arange(min_freq, max_freq, interp_freq_step)
 
     new_fft = interp_spectra(new_freqs)
-
     return new_fft
 
 
@@ -105,7 +123,7 @@ def main(level=3, basedir="./"):
     print("done loading files", time.time() - tstart)
 
     # remove any failed files
-    
+
     print("Failed Files:")
     failed_files = [i for i in ffts if type(i[0]) is str]
     for i in failed_files:
@@ -115,10 +133,11 @@ def main(level=3, basedir="./"):
 
     [print(i) for i in ffts if type(i[0]) is str]
     ffts = np.array([i for i in ffts if i is not None])
+    #import ipdb; ipdb.set_trace()
     # the nyquist frequency
     max_freq = 1 / (3 * 60)
     # min freq corresponds to a 200 min period
-    min_freq = 1 / (200 * 60)
+    min_freq = 1 / (172800)
     # frequency step, use 2x the highest frequency step ive seen
     # to avoid aliasing
     interp_freq_step = 1.87e-07
