@@ -12,18 +12,18 @@ from scipy.optimize import curve_fit
 # before using this code!
 
 
-def load_file(path):
+def load_file(path, minsize=100):
     """
     Loads an IGETS data product file at path
     """
     try:
-        data = np.genfromtxt(path,
-                             skip_header=30,
-                             skip_footer=2,
-                             invalid_raise=False,
-                             usecols=(0, 1, 2),
-                             encoding='latin1',
-                             delimiter=(9, 6, 10))
+        raw_data = np.genfromtxt(path,
+                                 skip_header=30,
+                                 skip_footer=2,
+                                 invalid_raise=False,
+                                 usecols=(0, 1, 2),
+                                 encoding='latin1',
+                                 delimiter=(9, 6, 10))
     except UnicodeDecodeError:
         return ("Unicode Issue", path)
         # raise ValueError("path is  " + path)
@@ -31,39 +31,70 @@ def load_file(path):
     # pathalogical lines exist two ways, either they start with a nan
     # or with a number like 77777777 or 99999999. filter both
     #
-    data = data[~np.isnan(data[:, 0])]
-    data = data[~np.isclose(data[:, 0], 77777777)]
-    data = data[~np.isclose(data[:, 0], 88888888)]
-    data = data[~np.isclose(data[:, 0], 99999999)]
+    split_mask = np.isnan(raw_data[:, 0])\
+                      + np.isnan(raw_data[:, 1])\
+                      + np.isnan(raw_data[:, 2])\
+                      + np.isclose(raw_data[:, 0], 77777777)\
+                      + np.isclose(raw_data[:, 0], 88888888)\
+                      + np.isclose(raw_data[:, 0], 99999999)
+    splits = np.where(split_mask)[0]
+
+    datalist = []
+    if splits.size != 0:
+        print("found a split!")
+        print(path)
+        print(splits)
+        for count, index in enumerate(splits):
+            if count == 0:
+                if index > minsize:
+                    datalist.append(raw_data[:index])
+            else:
+                # split_mask[count - 1] + 1 is the index of the next data point
+                # after the last bad one
+                candidate = raw_data[splits[count - 1] + 1:index]
+                if len(candidate) > minsize:
+                    datalist.append(candidate)
+    else:
+        datalist = [raw_data]
+
     # pull out just the year/month/day column and the hour/minute/second column
     # and cast them to strings (int as an intermediate to remove spurious
     # decimals
-    yyyymmdd = data[:, 0].astype(int).astype(str)
-    hhmmss = data[:, 1].astype(int).astype(str)
-    hhmmss = np.core.defchararray.zfill(hhmmss, 6)
+    resultlist = []
+    for data in datalist:
+        yyyymmdd = data[:, 0].astype(int).astype(str)
+        hhmmss = data[:, 1].astype(int).astype(str)
+        hhmmss = np.core.defchararray.zfill(hhmmss, 6)
 
-    years = [i[0:4] for i in yyyymmdd]
-    months = [i[4:6] for i in yyyymmdd]
-    days = [i[6:8] for i in yyyymmdd]
+        years = [i[0:4] for i in yyyymmdd]
+        months = [i[4:6] for i in yyyymmdd]
+        days = [i[6:8] for i in yyyymmdd]
 
-    hours = [i[0:2] for i in hhmmss]
-    minutes = [i[2:4] for i in hhmmss]
-    seconds = [i[4:6] for i in hhmmss]
+        hours = [i[0:2] for i in hhmmss]
+        minutes = [i[2:4] for i in hhmmss]
+        seconds = [i[4:6] for i in hhmmss]
 
-    ymd = ["-".join(i) for i in zip(years, months, days)]
-    hms = [":".join(i) for i in zip(hours, minutes, seconds)]
-    try:
-        timestamps = np.array(["T".join(i) for i in zip(ymd, hms)],
-                              dtype=np.datetime64)
-    except ValueError:
-        print("something wrong with date.")
-        print(path)
-        # raise ValueError("path is: " + path)
-        print("Skipping this file...")
-        return ("date issue with", path)
+        ymd = ["-".join(i) for i in zip(years, months, days)]
+        hms = [":".join(i) for i in zip(hours, minutes, seconds)]
+        try:
+            timestamps = np.array(["T".join(i) for i in zip(ymd, hms)],
+                                  dtype=np.datetime64)
+        except ValueError:
+            print("something wrong with date.")
+            print(path)
+            # raise ValueError("path is: " + path)
+            print("Skipping this file...")
+            return ("date issue with", path)
 
-    result = np.column_stack((timestamps.astype(np.float), data[:, 2]))
-    return do_fft_on_data(result)
+        result = np.column_stack((timestamps.astype(np.float), data[:, 2]))
+        resultlist.append(result)
+    fft_list = np.array(list(map(do_fft_on_data, resultlist)))
+
+    mean_fft = fft_list.mean(axis=0)
+    if type(mean_fft) is not np.ndarray:
+        return ("issues with", path)
+    else:
+        return mean_fft
 
 
 def do_fft_on_data(data, max_freq=1 / 180, min_freq=1 / 172800):
@@ -75,14 +106,12 @@ def do_fft_on_data(data, max_freq=1 / 180, min_freq=1 / 172800):
     # below this frequency we run into the tides
     bl_tidal_cutoff = 3.655e-5
 
-    one_on_f = lambda f, A, B, C, D, y0: A / f + B / f**2 + C / f**3 + D / f ** 4 +  y0
+    one_on_f = lambda f, A, B, C, D, y0: A / f + B / f**2 + C / f**3 + D / f**4 + y0
     tide_mask = freqs > bl_tidal_cutoff
     # plt.plot(freqs[tide_mask], fft[tide_mask])
     # fit only the non-tidal region
-    fit_results = curve_fit(one_on_f,
-                            freqs[tide_mask],
-                            fft[tide_mask])
-    print(fit_results[0])
+    fit_results = curve_fit(one_on_f, freqs[tide_mask], fft[tide_mask])
+    #print(fit_results[0])
     # subtract the baseline
     fft = fft - one_on_f(freqs, *fit_results[0])
     # plt.plot(freqs[tide_mask], fft[tide_mask])
