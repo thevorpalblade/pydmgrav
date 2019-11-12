@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit
+from scipy import signal
 
 # need to run ipcluster start
 # before using this code!
@@ -99,8 +100,11 @@ def load_file(path, minsize=100):
 
 def do_fft_on_data(data, max_freq=1 / 180, min_freq=1 / 172800):
     timestep = data[1, 0] - data[0, 0]
-    freqs = np.fft.rfftfreq(len(data), timestep)
-    fft = np.abs(np.fft.rfft(data[:, 1]))
+    # freqs = np.fft.rfftfreq(len(data), timestep)
+    # fft = np.abs(np.fft.rfft(data[:, 1]))
+    # So this in now the sqrt(PSD) not the FFT, but that's ok.
+    freqs, fft = signal.welch(data[:, 1], 1/timestep)
+    fft = np.sqrt(fft)
 
     # remove the baseline
     # below this frequency we run into the tides
@@ -133,7 +137,7 @@ def do_fft_on_data(data, max_freq=1 / 180, min_freq=1 / 172800):
     return new_fft
 
 
-def main(level=3, basedir="./"):
+def main(level=3, basedir="./", subtract_global_baseline=False):
     tstart = time.time()
     if level == 3:
         files = glob.glob(basedir + "**/Level3/**/*RESMIN*.ggp",
@@ -173,6 +177,16 @@ def main(level=3, basedir="./"):
     freqs = np.arange(min_freq, max_freq, interp_freq_step)
 
     mean_fft = np.mean(ffts, axis=0)
+
+
+    if subtract_global_baseline:
+        one_on_f = lambda f, A, B, C, D, y0: A / f + B / f**2 + C / f**3 + D / f**4 + y0
+        fit_results = curve_fit(one_on_f, freqs, mean_fft)
+        mean_fft = mean_fft - one_on_f(freqs, *fit_results[0])
+        # plt.plot(freqs[tide_mask], fft[tide_mask])
+        # plt.pause(.5)
+        # plt.clf()
+
     print("done averaging", time.time() - tstart)
     return freqs, mean_fft
 
