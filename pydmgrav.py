@@ -100,12 +100,10 @@ def load_file(path, minsize=100):
 
 def do_fft_on_data(data, max_freq=1 / 180, min_freq=1 / 172800):
     timestep = data[1, 0] - data[0, 0]
-    # freqs = np.fft.rfftfreq(len(data), timestep)
-    # fft = np.abs(np.fft.rfft(data[:, 1]))
-    # So this in now the sqrt(PSD) not the FFT, but that's ok.
-    freqs, fft = signal.welch(data[:, 1], 1/timestep)
-    fft = np.sqrt(fft)
+    freqs = np.fft.rfftfreq(len(data), timestep)
+    fft = np.abs(np.fft.rfft(data[:, 1]))
 
+    psd = (timestep ** 2) * (fft ** 2) / (data[-1, 0] - data[0, 0])
     # remove the baseline
     # below this frequency we run into the tides
     bl_tidal_cutoff = 3.655e-5
@@ -114,15 +112,15 @@ def do_fft_on_data(data, max_freq=1 / 180, min_freq=1 / 172800):
     tide_mask = freqs > bl_tidal_cutoff
     # plt.plot(freqs[tide_mask], fft[tide_mask])
     # fit only the non-tidal region
-    fit_results = curve_fit(one_on_f, freqs[tide_mask], fft[tide_mask])
+    fit_results = curve_fit(one_on_f, freqs[tide_mask], psd[tide_mask])
     #print(fit_results[0])
     # subtract the baseline
-    fft = fft - one_on_f(freqs, *fit_results[0])
+    psd = psd - one_on_f(freqs, *fit_results[0])
     # plt.plot(freqs[tide_mask], fft[tide_mask])
     # plt.pause(.5)
     # plt.clf()
 
-    interp_spectra = interp1d(freqs, np.abs(fft))
+    interp_spectra = interp1d(freqs, psd)
 
     # the nyquist frequency
     #max_freq = 1 / (3 * 60)
@@ -133,8 +131,8 @@ def do_fft_on_data(data, max_freq=1 / 180, min_freq=1 / 172800):
     interp_freq_step = 1.87e-07
     new_freqs = np.arange(min_freq, max_freq, interp_freq_step)
 
-    new_fft = interp_spectra(new_freqs)
-    return new_fft
+    new_psd = interp_spectra(new_freqs)
+    return new_psd
 
 
 def main(level=3, basedir="./", subtract_global_baseline=False):
