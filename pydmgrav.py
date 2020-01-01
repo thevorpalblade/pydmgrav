@@ -2,12 +2,14 @@
 import glob
 import time
 
-import ipyparallel as ipp
+#import ipyparallel as ipp
+from multiprocessing import Pool
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit
 from scipy import signal
+import tqdm
 
 # need to run ipcluster start
 # before using this code!
@@ -146,11 +148,12 @@ def main(level=3, basedir="./", subtract_global_baseline=False):
     # interpolate results to add them
     # load the files in parallel
     print("start loading files")
-    rc = ipp.Client()
-    dview = rc[:]
+    # rc = ipp.Client()
+    # dview = rc[:]
+    with Pool(processes=8) as p:
 
-    ffts = dview.map_sync(load_file, files)
-    # ffts = list(map(load_file, files))
+        ffts = p.map(load_file, files, chunksize=5)
+    #ffts = list(map(load_file, files))
     print("done loading files", time.time() - tstart)
 
     # remove any failed files
