@@ -1,15 +1,13 @@
 #/usr/bin/python
 import glob
 import time
-#import ipyparallel as ipp
-from multiprocessing import Pool
-
+import functools
+import os
 import numpy as np
-import tqdm
 from matplotlib import pyplot as plt
-from scipy import signal
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit
+from multiprocessing import Pool
 
 # need to run ipcluster start
 # before using this code!
@@ -112,7 +110,7 @@ def do_fft_on_data(data,
                    max_freq=1 / 180,
                    min_freq=1 / 172800,
                    bl_tidal_cutoff=3.655e-5,
-                   inject_amplitude=400):
+                   inject_amplitude=None):
     timestep = data[1, 0] - data[0, 0]
     freqs = np.fft.rfftfreq(len(data), timestep)
     fft = np.fft.rfft(data[:, 1])
@@ -121,14 +119,6 @@ def do_fft_on_data(data,
         fft = fft + gaussian(freqs, inject_amplitude, .000001, 1/3300)
 
     psd = (timestep**2) * (np.abs(fft)**2) / (data[-1, 0] - data[0, 0])
-    # remove the baseline
-
-    # only fit data that's higher in freqeuncy than the tides
-    tide_mask = freqs > bl_tidal_cutoff
-    fit_results = curve_fit(one_on_f, freqs[tide_mask], psd[tide_mask])
-    # subtract the baseline
-    psd = psd - one_on_f(freqs, *fit_results[0])
-
     # interpolate the spectra so we can average them properly later
     interp_spectra = interp1d(freqs, psd)
 
@@ -147,9 +137,10 @@ def do_fft_on_data(data,
 
 def main(level=3,
          basedir="./",
-         subtract_global_baseline=False,
+         subtract_global_baseline=True,
          max_freq=1 / 180,
          min_freq=1 / 172800,
+         bl_tidal_cutoff=3.655e-5,
          interp_freq_step=1.87e-07):
     tstart = time.time()
     if level == 3:
@@ -161,7 +152,7 @@ def main(level=3,
     # load the files in parallel
     print("start loading files")
     with Pool(processes=8) as p:
-        ffts = p.map(load_file, files, chunksize=5)
+        psds = p.map(load_file, files, chunksize=5)
     # single threaded version of above for debugging:
     # ffts = list(map(load_file, files))
     print("done loading files", time.time() - tstart)
@@ -169,26 +160,37 @@ def main(level=3,
     # Print and then remove any failed files
 
     print("Failed Files:")
-    failed_files = [i for i in ffts if type(i[0]) is str]
+    failed_files = [i for i in psds if type(i[0]) is str]
     for i in failed_files:
         print(i)
     # remove the failed files
-    ffts[:] = [i for i in ffts if type(i[0]) is not str]
-    [print(i) for i in ffts if type(i[0]) is str]
-    ffts = np.array([i for i in ffts if i is not None])
+    psds[:] = [i for i in psds if type(i[0]) is not str]
+    [print(i) for i in psds if type(i[0]) is str]
+    psds = np.array([i for i in psds if i is not None])
     # generate the frequency array
     freqs = np.arange(min_freq, max_freq, interp_freq_step)
 
-    mean_fft = np.mean(ffts, axis=0)
+    mean_psd = np.mean(psds, axis=0)
+    mean_asd = np.sqrt(mean_psd)
 
     if subtract_global_baseline:
-        fit_results = curve_fit(one_on_f, freqs, mean_fft)
-        mean_fft = mean_fft - one_on_f(freqs, *fit_results[0])
+        # remove the baseline
+        # only fit data that's higher in freqeuncy than the tides
+        tide_mask = freqs > bl_tidal_cutoff
+        fit_results = curve_fit(one_on_f, freqs[tide_mask], mean_asd[tide_mask])
+        # subtract the baseline
+        mean_asd = mean_asd - one_on_f(freqs, *fit_results[0])
 
     print("done averaging", time.time() - tstart)
-    return freqs, mean_fft
+    return freqs, mean_asd
 
 
+def do_all_sites():
+    sites = np.array(os.listdir())[[os.path.isdir(i) and i[0].isupper() for i in os.listdir()]]
+    
+    for i, site in enumerate(sites):
+        pass
+        
 def plot_results(freqs, fft):
     periods = 1 / (60 * freqs)
 
