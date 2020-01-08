@@ -1,15 +1,15 @@
 #/usr/bin/python
 import glob
 import time
-
 #import ipyparallel as ipp
 from multiprocessing import Pool
+
 import numpy as np
+import tqdm
 from matplotlib import pyplot as plt
+from scipy import signal
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit
-from scipy import signal
-import tqdm
 
 # need to run ipcluster start
 # before using this code!
@@ -100,34 +100,42 @@ def load_file(path, minsize=100):
         return mean_fft
 
 
-def do_fft_on_data(data, max_freq=1 / 180, min_freq=1 / 172800):
+def gaussian(f, a, sigma, f0):
+    return a * np.exp(-(((f - f0)/sigma) ** 2))
+
+
+def one_on_f(f, A, B, C, D, y0):
+    return A / f + B / f**2 + C / f**3 + D / f**4 + y0
+ 
+
+def do_fft_on_data(data,
+                   max_freq=1 / 180,
+                   min_freq=1 / 172800,
+                   bl_tidal_cutoff=3.655e-5,
+                   inject_amplitude=400):
     timestep = data[1, 0] - data[0, 0]
     freqs = np.fft.rfftfreq(len(data), timestep)
-    fft = np.abs(np.fft.rfft(data[:, 1]))
+    fft = np.fft.rfft(data[:, 1])
 
-    psd = (timestep ** 2) * (fft ** 2) / (data[-1, 0] - data[0, 0])
+    if inject_amplitude is not None:
+        fft = fft + gaussian(freqs, inject_amplitude, .000001, 1/3300)
+
+    psd = (timestep**2) * (np.abs(fft)**2) / (data[-1, 0] - data[0, 0])
     # remove the baseline
-    # below this frequency we run into the tides
-    bl_tidal_cutoff = 3.655e-5
 
-    one_on_f = lambda f, A, B, C, D, y0: A / f + B / f**2 + C / f**3 + D / f**4 + y0
+    # only fit data that's higher in freqeuncy than the tides
     tide_mask = freqs > bl_tidal_cutoff
-    # plt.plot(freqs[tide_mask], fft[tide_mask])
-    # fit only the non-tidal region
     fit_results = curve_fit(one_on_f, freqs[tide_mask], psd[tide_mask])
-    #print(fit_results[0])
     # subtract the baseline
     psd = psd - one_on_f(freqs, *fit_results[0])
-    # plt.plot(freqs[tide_mask], fft[tide_mask])
-    # plt.pause(.5)
-    # plt.clf()
 
+    # interpolate the spectra so we can average them properly later
     interp_spectra = interp1d(freqs, psd)
 
     # the nyquist frequency
-    #max_freq = 1 / (3 * 60)
+    # max_freq = 1 / (3 * 60)
     # min freq corresponds to a 200 min period
-    #min_freq = 1 / (200 * 60)
+    # min_freq = 1 / (200 * 60)
     # frequency step, use 2x the highest frequency step ive seen
     # to avoid aliasing
     interp_freq_step = 1.87e-07
@@ -137,7 +145,12 @@ def do_fft_on_data(data, max_freq=1 / 180, min_freq=1 / 172800):
     return new_psd
 
 
-def main(level=3, basedir="./", subtract_global_baseline=False):
+def main(level=3,
+         basedir="./",
+         subtract_global_baseline=False,
+         max_freq=1 / 180,
+         min_freq=1 / 172800,
+         interp_freq_step=1.87e-07):
     tstart = time.time()
     if level == 3:
         files = glob.glob(basedir + "**/Level3/**/*RESMIN*.ggp",
@@ -145,18 +158,15 @@ def main(level=3, basedir="./", subtract_global_baseline=False):
     elif level == 2:
         files = glob.glob(basedir + "**/Level2/**/*CORMIN*.ggp",
                           recursive=True)
-    # interpolate results to add them
     # load the files in parallel
     print("start loading files")
-    # rc = ipp.Client()
-    # dview = rc[:]
     with Pool(processes=8) as p:
-
         ffts = p.map(load_file, files, chunksize=5)
-    #ffts = list(map(load_file, files))
+    # single threaded version of above for debugging:
+    # ffts = list(map(load_file, files))
     print("done loading files", time.time() - tstart)
 
-    # remove any failed files
+    # Print and then remove any failed files
 
     print("Failed Files:")
     failed_files = [i for i in ffts if type(i[0]) is str]
@@ -164,29 +174,16 @@ def main(level=3, basedir="./", subtract_global_baseline=False):
         print(i)
     # remove the failed files
     ffts[:] = [i for i in ffts if type(i[0]) is not str]
-
     [print(i) for i in ffts if type(i[0]) is str]
     ffts = np.array([i for i in ffts if i is not None])
-    #import ipdb; ipdb.set_trace()
-    # the nyquist frequency
-    max_freq = 1 / (3 * 60)
-    # min freq corresponds to a 200 min period
-    min_freq = 1 / (172800)
-    # frequency step, use 2x the highest frequency step ive seen
-    # to avoid aliasing
-    interp_freq_step = 1.87e-07
+    # generate the frequency array
     freqs = np.arange(min_freq, max_freq, interp_freq_step)
 
     mean_fft = np.mean(ffts, axis=0)
 
-
     if subtract_global_baseline:
-        one_on_f = lambda f, A, B, C, D, y0: A / f + B / f**2 + C / f**3 + D / f**4 + y0
         fit_results = curve_fit(one_on_f, freqs, mean_fft)
         mean_fft = mean_fft - one_on_f(freqs, *fit_results[0])
-        # plt.plot(freqs[tide_mask], fft[tide_mask])
-        # plt.pause(.5)
-        # plt.clf()
 
     print("done averaging", time.time() - tstart)
     return freqs, mean_fft
