@@ -147,10 +147,21 @@ def do_fft_on_data(data,
 
 
 def convert_files(level=3, basedir="./"):
+    """
+    level can be 2, 3, or "both"
+    """
+    files = []
     files3 = glob.glob(basedir + "/**/Level3/**/*RESMIN*.ggp", recursive=True)
     files2 = glob.glob(basedir + "/**/Level2/**/*CORMIN*.ggp", recursive=True)
 
-    for f in tqdm(files2 + files3):
+    if level == 3:
+        files += files3
+    if level == 2:
+        files += files2
+    if level == "both":
+        files = files3 + files2
+
+    for f in tqdm(files):
         x = load_file(f, dump_to_npy=True)
     return
 
