@@ -1,19 +1,21 @@
 #/usr/bin/python
-import glob
-import time
 import functools
+import glob
 import os
+import time
+from multiprocessing import Pool
+
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit
-from multiprocessing import Pool
+from tqdm import tqdm
 
 # need to run ipcluster start
 # before using this code!
 
 
-def load_file(path, minsize=100):
+def load_file(path, minsize=100, dump_to_npy=False):
     """
     Loads an IGETS data product file at path
     """
@@ -89,6 +91,13 @@ def load_file(path, minsize=100):
 
         result = np.column_stack((timestamps.astype(np.float), data[:, 2]))
         resultlist.append(result)
+    if dump_to_npy:
+        # strip the extension
+        new_path = path[:-4]
+        for i, r in enumerate(resultlist):
+            np.save(new_path + "_" + str(i) + ".npy", r)
+        return
+
     fft_list = np.array(list(map(do_fft_on_data, resultlist)))
 
     mean_fft = fft_list.mean(axis=0)
@@ -99,24 +108,27 @@ def load_file(path, minsize=100):
 
 
 def gaussian(f, a, sigma, f0):
-    return a * np.exp(-(((f - f0)/sigma) ** 2))
+    return a * np.exp(-(((f - f0) / sigma)**2))
 
 
 def one_on_f(f, A, B, C, D, y0):
     return A / f + B / f**2 + C / f**3 + D / f**4 + y0
- 
+
 
 def do_fft_on_data(data,
                    max_freq=1 / 180,
                    min_freq=1 / 172800,
                    bl_tidal_cutoff=3.655e-5,
+                   interp_freq_step=1.87e-07,
                    inject_amplitude=None):
+    if type(data) is str:
+        data = np.load(data)
     timestep = data[1, 0] - data[0, 0]
     freqs = np.fft.rfftfreq(len(data), timestep)
     fft = np.fft.rfft(data[:, 1])
 
     if inject_amplitude is not None:
-        fft = fft + gaussian(freqs, inject_amplitude, .000001, 1/3300)
+        fft = fft + gaussian(freqs, inject_amplitude, .000001, 1 / 3300)
 
     psd = (timestep**2) * (np.abs(fft)**2) / (data[-1, 0] - data[0, 0])
     # interpolate the spectra so we can average them properly later
@@ -128,26 +140,80 @@ def do_fft_on_data(data,
     # min_freq = 1 / (200 * 60)
     # frequency step, use 2x the highest frequency step ive seen
     # to avoid aliasing
-    interp_freq_step = 1.87e-07
     new_freqs = np.arange(min_freq, max_freq, interp_freq_step)
 
     new_psd = interp_spectra(new_freqs)
     return new_psd
 
 
-def main(level=3,
-         basedir="./",
-         subtract_global_baseline=True,
-         max_freq=1 / 180,
-         min_freq=1 / 172800,
-         bl_tidal_cutoff=3.655e-5,
-         interp_freq_step=1.87e-07):
+def convert_files(level=3, basedir="./"):
+    files3 = glob.glob(basedir + "/**/Level3/**/*RESMIN*.ggp", recursive=True)
+    files2 = glob.glob(basedir + "/**/Level2/**/*CORMIN*.ggp", recursive=True)
+
+    for f in tqdm(files2 + files3):
+        x = load_file(f, dump_to_npy=True)
+    return
+
+
+def main_npy(level=3,
+             basedir="./",
+             subtract_global_baseline=True,
+             max_freq=1 / 180,
+             min_freq=1 / 172800,
+             bl_tidal_cutoff=3.655e-5,
+             interp_freq_step=1.87e-07):
     tstart = time.time()
     if level == 3:
-        files = glob.glob(basedir + "**/Level3/**/*RESMIN*.ggp",
+        files = glob.glob(basedir + "/**/Level3/**/*RESMIN*.npy",
                           recursive=True)
     elif level == 2:
-        files = glob.glob(basedir + "**/Level2/**/*CORMIN*.ggp",
+        files = glob.glob(basedir + "/**/Level2/**/*CORMIN*.npy",
+                          recursive=True)
+
+    # load the files in parallel
+    print("start loading files")
+    with Pool(processes=8) as p:
+        psds = list(
+            tqdm(p.imap(do_fft_on_data, files, chunksize=50),
+                 total=len(files)))
+
+    psds = np.array(psds)
+    # single threaded version of above for debugging:
+    # ffts = list(map(load_file, files))
+    print("done loading files", time.time() - tstart)
+
+    # generate the frequency array
+    freqs = np.arange(min_freq, max_freq, interp_freq_step)
+
+    mean_psd = np.mean(psds, axis=0)
+    mean_asd = np.sqrt(mean_psd)
+
+    if subtract_global_baseline:
+        # remove the baseline
+        # only fit data that's higher in freqeuncy than the tides
+        tide_mask = freqs > bl_tidal_cutoff
+        fit_results = curve_fit(one_on_f, freqs[tide_mask],
+                                mean_asd[tide_mask])
+        # subtract the baseline
+        mean_asd = mean_asd - one_on_f(freqs, *fit_results[0])
+
+    print("done averaging", time.time() - tstart)
+    return np.array((freqs, mean_asd))
+
+
+def main_raw(level=3,
+             basedir="./",
+             subtract_global_baseline=True,
+             max_freq=1 / 180,
+             min_freq=1 / 172800,
+             bl_tidal_cutoff=3.655e-5,
+             interp_freq_step=1.87e-07):
+    tstart = time.time()
+    if level == 3:
+        files = glob.glob(basedir + "/**/Level3/**/*RESMIN*.ggp",
+                          recursive=True)
+    elif level == 2:
+        files = glob.glob(basedir + "/**/Level2/**/*CORMIN*.ggp",
                           recursive=True)
     # load the files in parallel
     print("start loading files")
@@ -177,20 +243,33 @@ def main(level=3,
         # remove the baseline
         # only fit data that's higher in freqeuncy than the tides
         tide_mask = freqs > bl_tidal_cutoff
-        fit_results = curve_fit(one_on_f, freqs[tide_mask], mean_asd[tide_mask])
+        fit_results = curve_fit(one_on_f, freqs[tide_mask],
+                                mean_asd[tide_mask])
         # subtract the baseline
         mean_asd = mean_asd - one_on_f(freqs, *fit_results[0])
 
     print("done averaging", time.time() - tstart)
-    return freqs, mean_asd
+    return np.array((freqs, mean_asd))
 
 
 def do_all_sites():
-    sites = np.array(os.listdir())[[os.path.isdir(i) and i[0].isupper() for i in os.listdir()]]
-    
+    sites = np.array(os.listdir())[[
+        os.path.isdir(i) and i[0].isupper() for i in os.listdir()
+    ]]
+    # filter out sites without level3 data
+    sites = [i for i in sites if glob.glob(i + "/**/Level3")]
+
+    results = []
     for i, site in enumerate(sites):
-        pass
-        
+        print(site)
+        result = main(basedir=site)
+        plt.plot(result[0], result[1], label=site)
+        plt.legend()
+        plt.pause(.1)
+        results.append(result)
+    return np.array(results)
+
+
 def plot_results(freqs, fft):
     periods = 1 / (60 * freqs)
 
