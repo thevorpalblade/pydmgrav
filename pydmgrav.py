@@ -15,6 +15,12 @@ from tqdm import tqdm
 # before using this code!
 
 
+# make blacklist
+with open("blacklist.txt", 'r') as blackfile:
+    bl = blackfile.readlines()
+    BLACKLIST = [i.strip() for i in bl if (i[0] != "#") and (i.strip() != '')]
+
+
 def load_file(path, minsize=100, dump_to_npy=False):
     """
     Loads an IGETS data product file at path
@@ -140,6 +146,7 @@ def do_fft_on_data(data,
     # min_freq = 1 / (200 * 60)
     # frequency step, use 2x the highest frequency step ive seen
     # to avoid aliasing
+    # interp_freq_step=1.87e-07
     new_freqs = np.arange(min_freq, max_freq, interp_freq_step)
 
     new_psd = interp_spectra(new_freqs)
@@ -180,6 +187,7 @@ def main_npy(level=3,
     elif level == 2:
         files = glob.glob(basedir + "/**/Level2/**/*CORMIN*.npy",
                           recursive=True)
+    files = [i for i in files if i not in BLACKLIST]
 
     # load the files in parallel
     print("start loading files")
@@ -226,6 +234,7 @@ def main_raw(level=3,
     elif level == 2:
         files = glob.glob(basedir + "/**/Level2/**/*CORMIN*.ggp",
                           recursive=True)
+    files = [i for i in files if i not in BLACKLIST]
     # load the files in parallel
     print("start loading files")
     with Pool(processes=8) as p:
@@ -264,6 +273,10 @@ def main_raw(level=3,
 
 
 def do_all_sites():
+    """
+    This function does the data reduction on each site, one at a time,
+    then plots them and returns the results in an array.
+    """
     sites = np.array(os.listdir())[[
         os.path.isdir(i) and i[0].isupper() for i in os.listdir()
     ]]
@@ -273,7 +286,7 @@ def do_all_sites():
     results = []
     for i, site in enumerate(sites):
         print(site)
-        result = main(basedir=site)
+        result = main_npy(basedir=site)
         plt.plot(result[0], result[1], label=site)
         plt.legend()
         plt.pause(.1)
@@ -281,6 +294,36 @@ def do_all_sites():
     return np.array(results)
 
 
+def dig_single_site(basedir):
+    """
+    Crappy little function to dig into specific sites and look at the
+    individual 1-month spectra. Mostly a scratchpad function, as what needs
+    investigating varies.
+    """
+    files = glob.glob(basedir + "/**/Level3/**/*RESMIN*.npy", recursive=True)
+
+    # the nyquist frequency
+    max_freq = 1 / (3 * 60)
+    # min freq corresponds to a 200 min period
+    min_freq = 1 / (48 * 60 * 60)
+    # frequency step, use 2x the highest frequency step ive seen
+    # to avoid aliasing
+    interp_freq_step = 1.87e-07
+    freqs = np.arange(min_freq, max_freq, interp_freq_step)
+    max_val = 0
+
+    mask = (freqs > 0.003) * (freqs < 0.004)
+
+    for f in files:
+        data = np.load(f)
+        psd = do_fft_on_data(data)
+        plt.plot(freqs, psd)
+        if np.std(psd[mask]) > max_val:
+            max_val = np.std(psd[mask])
+        print(f)
+        print(np.std(psd[mask]))
+
+ 
 def plot_results(freqs, fft):
     periods = 1 / (60 * freqs)
 

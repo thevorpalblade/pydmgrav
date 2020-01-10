@@ -1,0 +1,15 @@
+# bad files
+./Strasbourg/st023/Level3/2019/IGETS-SG-RESMIN-st023-201905r2.ggp
+./Strasbourg/st023/Level3/2019/IGETS-SG-RESMIN-st023-201905r2_0.npy
+./Concepcion/tc038/Level3/2003/IGETS-SG-RESMIN-tc038-200304r2_0.npy
+./Concepcion/tc038/Level3/2003/IGETS-SG-RESMIN-tc038-200305r2_0.npy
+./Concepcion/tc038/Level3/2003/IGETS-SG-RESMIN-tc038-200301r2_0.npy
+./Concepcion/tc038/Level3/2004/IGETS-SG-RESMIN-tc038-200406r2_0.npy
+./Concepcion/tc038/Level3/2003/IGETS-SG-RESMIN-tc038-200310r2_0.npy
+./Concepcion/tc038/Level3/2003/IGETS-SG-RESMIN-tc038-200304r2.ggp
+./Concepcion/tc038/Level3/2003/IGETS-SG-RESMIN-tc038-200305r2.ggp
+./Concepcion/tc038/Level3/2003/IGETS-SG-RESMIN-tc038-200301r2.ggp
+./Concepcion/tc038/Level3/2004/IGETS-SG-RESMIN-tc038-200406r2.ggp
+./Concepcion/tc038/Level3/2003/IGETS-SG-RESMIN-tc038-200310r2.ggp
+
+
