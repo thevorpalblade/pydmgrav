@@ -1,9 +1,7 @@
 #/usr/bin/python
-import functools
-import glob
-import os
 import time
 from multiprocessing import Pool
+from pathlib import Path
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -14,12 +12,10 @@ from tqdm import tqdm
 # need to run ipcluster start
 # before using this code!
 
-
 # make blacklist
-with open("blacklist.txt", 'r') as blackfile:
-    bl = blackfile.readlines()
-    BLACKLIST = [i.strip() for i in bl if (i[0] != "#") and (i.strip() != '')]
-
+bl_path = Path("blacklist.txt")
+bl = bl_path.read_text().split("\n")
+BLACKLIST = [Path(i) for i in bl if (i != '') and (i[0] != "#")]
 
 def load_file(path, minsize=100, dump_to_npy=False):
     """
@@ -127,7 +123,7 @@ def do_fft_on_data(data,
                    bl_tidal_cutoff=3.655e-5,
                    interp_freq_step=1.87e-07,
                    inject_amplitude=None):
-    if type(data) is str:
+    if type(data) is not np.ndarray:
         data = np.load(data)
     timestep = data[1, 0] - data[0, 0]
     freqs = np.fft.rfftfreq(len(data), timestep)
@@ -157,9 +153,10 @@ def convert_files(level=3, basedir="./"):
     """
     level can be 2, 3, or "both"
     """
+    basedir = Path(basedir)
     files = []
-    files3 = glob.glob(basedir + "/**/Level3/**/*RESMIN*.ggp", recursive=True)
-    files2 = glob.glob(basedir + "/**/Level2/**/*CORMIN*.ggp", recursive=True)
+    files3 = list(basedir.rglob("Level3/**/*RESMIN*.ggp"))
+    files2 = list(basedir.rglob("Level2/**/*CORMIN*.ggp"))
 
     if level == 3:
         files += files3
@@ -180,21 +177,22 @@ def main_npy(level=3,
              min_freq=1 / 172800,
              bl_tidal_cutoff=3.655e-5,
              interp_freq_step=1.87e-07):
+
+    basedir = Path(basedir)
     tstart = time.time()
     if level == 3:
-        files = glob.glob(basedir + "/**/Level3/**/*RESMIN*.npy",
-                          recursive=True)
+        files = basedir.rglob("Level3/**/*RESMIN*.npy")
     elif level == 2:
-        files = glob.glob(basedir + "/**/Level2/**/*CORMIN*.npy",
-                          recursive=True)
+        files = basedir.rglob("Level2/**/*CORMIN*.npy")
     files = [i for i in files if i not in BLACKLIST]
 
     # load the files in parallel
     print("start loading files")
-    with Pool(processes=8) as p:
-        psds = list(
-            tqdm(p.imap(do_fft_on_data, files, chunksize=50),
-                 total=len(files)))
+    # with Pool(processes=8) as p:
+    #     psds = list(
+    #         tqdm(p.imap(do_fft_on_data, files, chunksize=50),
+    #              total=len(files)))
+    psds = list(map(do_fft_on_data, tqdm(files)))
 
     psds = np.array(psds)
     # single threaded version of above for debugging:
@@ -227,13 +225,12 @@ def main_raw(level=3,
              min_freq=1 / 172800,
              bl_tidal_cutoff=3.655e-5,
              interp_freq_step=1.87e-07):
+    basedir = Path(basedir)
     tstart = time.time()
     if level == 3:
-        files = glob.glob(basedir + "/**/Level3/**/*RESMIN*.ggp",
-                          recursive=True)
+        files = basedir.rglob("Level3/**/*RESMIN*.ggp")
     elif level == 2:
-        files = glob.glob(basedir + "/**/Level2/**/*CORMIN*.ggp",
-                          recursive=True)
+        files = basedir.rglob("Level2/**/*CORMIN*.ggp")
     files = [i for i in files if i not in BLACKLIST]
     # load the files in parallel
     print("start loading files")
@@ -277,11 +274,11 @@ def do_all_sites():
     This function does the data reduction on each site, one at a time,
     then plots them and returns the results in an array.
     """
-    sites = np.array(os.listdir())[[
-        os.path.isdir(i) and i[0].isupper() for i in os.listdir()
-    ]]
+    p = Path(".")
+    sites = [x for x in p.iterdir() if x.is_dir() and str(x)[0].isupper()]
+
     # filter out sites without level3 data
-    sites = [i for i in sites if glob.glob(i + "/**/Level3")]
+    sites = [i for i in sites if list(i.rglob("/Level3"))]
 
     results = []
     for i, site in enumerate(sites):
@@ -300,7 +297,8 @@ def dig_single_site(basedir):
     individual 1-month spectra. Mostly a scratchpad function, as what needs
     investigating varies.
     """
-    files = glob.glob(basedir + "/**/Level3/**/*RESMIN*.npy", recursive=True)
+    basedir = Path(basedir)
+    files = basedir.rglob("Level3/**/*RESMIN*.npy")
 
     # the nyquist frequency
     max_freq = 1 / (3 * 60)
@@ -323,7 +321,7 @@ def dig_single_site(basedir):
         print(f)
         print(np.std(psd[mask]))
 
- 
+
 def plot_results(freqs, fft):
     periods = 1 / (60 * freqs)
 
