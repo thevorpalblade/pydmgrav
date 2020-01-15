@@ -113,6 +113,10 @@ def gaussian(f, a, sigma, f0):
     return a * np.exp(-(((f - f0) / sigma)**2))
 
 
+def lorentzian(f, A, gamma, f0):
+    return (A/np.pi) * (gamma / 2) / ((f - f0)**2 + (gamma/2)**2)
+
+
 def one_on_f(f, A, B, C, D, y0):
     return A / f + B / f**2 + C / f**3 + D / f**4 + y0
 
@@ -130,7 +134,7 @@ def do_fft_on_data(data,
     fft = np.fft.rfft(data[:, 1])
 
     if inject_amplitude is not None:
-        fft = fft + gaussian(freqs, inject_amplitude, .000001, 1 / 3300)
+        fft = fft + lorentzian(freqs, inject_amplitude, .000001, 1 / 3300)
 
     psd = (timestep**2) * (np.abs(fft)**2) / (data[-1, 0] - data[0, 0])
     # interpolate the spectra so we can average them properly later
