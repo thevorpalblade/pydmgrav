@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit
+import scipy.stats
 from tqdm import tqdm
 
 # need to run ipcluster start
@@ -17,6 +18,18 @@ from tqdm import tqdm
 bl_path = Path("blacklist.txt")
 bl = bl_path.read_text().split("\n")
 BLACKLIST = [Path(i) for i in bl if (i != '') and (i[0] != "#")]
+
+
+# make fig3 function
+def make_fig3(path="fig3.data"):
+    fig3_x, fig3_y = np.loadtxt(path).T
+    fig3_x = fig3_x / 1000
+    amplitude = np.trapz(fig3_y, fig3_x)
+    return interp1d(fig3_x,
+                    fig3_y / amplitude,
+                    fill_value=0,
+                    bounds_error=False,
+                    kind="slinear")
 
 
 def load_file(path, minsize=100, dump_to_npy=False):
@@ -119,6 +132,10 @@ def lorentzian(f, A, gamma, f0):
     return (A / np.pi) * (gamma / 2) / ((f - f0)**2 + (gamma / 2)**2)
 
 
+# the figure 3 function
+fig3_f = make_fig3()
+
+
 def one_on_f(f, A, B, C, D, y0):
     return A / f + B / f**2 + C / f**3 + D / f**4 + y0
 
@@ -136,7 +153,8 @@ def do_fft_on_data(data,
     fft = np.fft.rfft(data[:, 1])
 
     if inject_amplitude is not None:
-        fft = fft + lorentzian(freqs, inject_amplitude, .000001, 1 / 3300)
+        # fft = fft + lorentzian(freqs, inject_amplitude, 0.05435, 1 / 3300)
+        fft = fft + inject_amplitude * fig3_f(freqs)
 
     psd = (timestep**2) * (np.abs(fft)**2) / (data[-1, 0] - data[0, 0])
     # interpolate the spectra so we can average them properly later
@@ -214,22 +232,25 @@ def main_npy(level=3,
 
     # generate the frequency array
     freqs = np.arange(min_freq, max_freq, interp_freq_step)
-
     mean_psd = np.mean(psds, axis=0)
+    mean_psd_sigma = scipy.stats.sem(psds, axis=0)
     mean_asd = np.sqrt(mean_psd)
+    # error propigation for square root
+    mean_asd_sigma = (1/2) * (mean_psd_sigma / mean_psd) * mean_asd
 
     if subtract_global_baseline:
         # remove the baseline
         # only fit data that's higher in freqeuncy than the tides
         tide_mask = freqs > bl_tidal_cutoff
         fit_results = curve_fit(one_on_f, freqs[tide_mask],
-                                mean_asd[tide_mask])
+                                mean_asd[tide_mask],
+                                sigma=mean_psd_sigma[tide_mask],
+                                absolute_sigma=True)
         # subtract the baseline
         mean_asd = mean_asd - one_on_f(freqs, *fit_results[0])
 
     print("done averaging", time.time() - tstart)
-    return np.array((freqs, mean_asd))
-
+    return np.array((freqs, mean_asd, mean_asd_sigma))
 
 def main_raw(level=3,
              basedir="./",
@@ -267,19 +288,24 @@ def main_raw(level=3,
     freqs = np.arange(min_freq, max_freq, interp_freq_step)
 
     mean_psd = np.mean(psds, axis=0)
+    mean_psd_sigma = scipy.stats.sem(psds, axis=0)
     mean_asd = np.sqrt(mean_psd)
+    # error propigation for square root
+    mean_asd_sigma = (1/2) * (mean_psd_sigma / mean_psd) * mean_asd
 
     if subtract_global_baseline:
         # remove the baseline
         # only fit data that's higher in freqeuncy than the tides
         tide_mask = freqs > bl_tidal_cutoff
         fit_results = curve_fit(one_on_f, freqs[tide_mask],
-                                mean_asd[tide_mask])
+                                mean_asd[tide_mask],
+                                sigma=mean_psd_sigma[tide_mask],
+                                absolute_sigma=True)
         # subtract the baseline
         mean_asd = mean_asd - one_on_f(freqs, *fit_results[0])
 
     print("done averaging", time.time() - tstart)
-    return np.array((freqs, mean_asd))
+    return np.array((freqs, mean_asd, mean_asd_sigma))
 
 
 def do_all_sites():
