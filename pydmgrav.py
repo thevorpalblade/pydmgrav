@@ -1,5 +1,6 @@
 #/usr/bin/python
 import time
+from itertools import repeat, starmap
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from tqdm import tqdm
 bl_path = Path("blacklist.txt")
 bl = bl_path.read_text().split("\n")
 BLACKLIST = [Path(i) for i in bl if (i != '') and (i[0] != "#")]
+
 
 def load_file(path, minsize=100, dump_to_npy=False):
     """
@@ -114,7 +116,7 @@ def gaussian(f, a, sigma, f0):
 
 
 def lorentzian(f, A, gamma, f0):
-    return (A/np.pi) * (gamma / 2) / ((f - f0)**2 + (gamma/2)**2)
+    return (A / np.pi) * (gamma / 2) / ((f - f0)**2 + (gamma / 2)**2)
 
 
 def one_on_f(f, A, B, C, D, y0):
@@ -180,7 +182,9 @@ def main_npy(level=3,
              max_freq=1 / 180,
              min_freq=1 / 172800,
              bl_tidal_cutoff=3.655e-5,
-             interp_freq_step=1.87e-07):
+             interp_freq_step=1.87e-07,
+             parallel=True,
+             inject_amplitude=None):
 
     basedir = Path(basedir)
     tstart = time.time()
@@ -190,13 +194,18 @@ def main_npy(level=3,
         files = basedir.rglob("Level2/**/*CORMIN*.npy")
     files = [i for i in files if i not in BLACKLIST]
 
+    args = zip(files, repeat(max_freq), repeat(min_freq),
+               repeat(bl_tidal_cutoff), repeat(interp_freq_step),
+               repeat(inject_amplitude))
     # load the files in parallel
     print("start loading files")
-    # with Pool(processes=8) as p:
-    #     psds = list(
-    #         tqdm(p.imap(do_fft_on_data, files, chunksize=50),
-    #              total=len(files)))
-    psds = list(map(do_fft_on_data, tqdm(files)))
+    if parallel:
+        with Pool(processes=8) as p:
+            psds = list(
+                tqdm(p.starmap(do_fft_on_data, args, chunksize=50),
+                     total=len(files)))
+    else:
+        psds = list(starmap(do_fft_on_data, tqdm(files)))
 
     psds = np.array(psds)
     # single threaded version of above for debugging:
