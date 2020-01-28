@@ -5,10 +5,10 @@ from multiprocessing import Pool
 from pathlib import Path
 
 import numpy as np
+import scipy.stats
 from matplotlib import pyplot as plt
 from scipy.interpolate import interp1d
 from scipy.optimize import curve_fit
-import scipy.stats
 from tqdm import tqdm
 
 # need to run ipcluster start
@@ -132,6 +132,12 @@ def lorentzian(f, A, gamma, f0):
     return (A / np.pi) * (gamma / 2) / ((f - f0)**2 + (gamma / 2)**2)
 
 
+def split_lor(f, A, gamma, f0, m, b):
+    split = 1 / (60 * 60 * 24)
+    return lorentzian(f, A / 2, gamma, f0 - split) + lorentzian(
+        f, A / 2, gamma, f0 + split) + m * f + b
+
+
 # the figure 3 function
 fig3_f = make_fig3()
 
@@ -236,13 +242,14 @@ def main_npy(level=3,
     mean_psd_sigma = scipy.stats.sem(psds, axis=0)
     mean_asd = np.sqrt(mean_psd)
     # error propigation for square root
-    mean_asd_sigma = (1/2) * (mean_psd_sigma / mean_psd) * mean_asd
+    mean_asd_sigma = (1 / 2) * (mean_psd_sigma / mean_psd) * mean_asd
 
     if subtract_global_baseline:
         # remove the baseline
         # only fit data that's higher in freqeuncy than the tides
         tide_mask = freqs > bl_tidal_cutoff
-        fit_results = curve_fit(one_on_f, freqs[tide_mask],
+        fit_results = curve_fit(one_on_f,
+                                freqs[tide_mask],
                                 mean_asd[tide_mask],
                                 sigma=mean_psd_sigma[tide_mask],
                                 absolute_sigma=True)
@@ -251,6 +258,7 @@ def main_npy(level=3,
 
     print("done averaging", time.time() - tstart)
     return np.array((freqs, mean_asd, mean_asd_sigma))
+
 
 def main_raw(level=3,
              basedir="./",
@@ -291,13 +299,14 @@ def main_raw(level=3,
     mean_psd_sigma = scipy.stats.sem(psds, axis=0)
     mean_asd = np.sqrt(mean_psd)
     # error propigation for square root
-    mean_asd_sigma = (1/2) * (mean_psd_sigma / mean_psd) * mean_asd
+    mean_asd_sigma = (1 / 2) * (mean_psd_sigma / mean_psd) * mean_asd
 
     if subtract_global_baseline:
         # remove the baseline
         # only fit data that's higher in freqeuncy than the tides
         tide_mask = freqs > bl_tidal_cutoff
-        fit_results = curve_fit(one_on_f, freqs[tide_mask],
+        fit_results = curve_fit(one_on_f,
+                                freqs[tide_mask],
                                 mean_asd[tide_mask],
                                 sigma=mean_psd_sigma[tide_mask],
                                 absolute_sigma=True)
@@ -359,6 +368,26 @@ def dig_single_site(basedir):
             max_val = np.std(psd[mask])
         print(f)
         print(np.std(psd[mask]))
+
+
+def rchisqr(r, p):
+    residuals = split_lor(r[0], *p) - r[1]
+    chisqr = np.sum((residuals / r[2]) ** 2)
+    return chisqr / (len(r[0]) - len(p))
+
+
+def do_injection():
+    inject_amplitudes = np.logspace(np.log(.00005), np.log(.005), 20, base=np.e)
+    rs = [main_npy(inject_amplitude=i) for i in inject_amplitudes]
+    p0 = [7.31462455e-05,  5.09127562e-07,  3.03933293e-04, -8.39103118e+04, 3.92960778e+01]
+    ps = []
+    rcs = []
+    for r in rs:
+        mask = (r[0] > .000275) * (r[0] < .000325)
+        p, cov = curve_fit(split_lor, r[0][mask], r[1][mask], p0=p0, sigma=r[2][mask])
+        ps.append(p)
+        rcs.append(rchisqr(r, p))
+    return (ps, rcs)
 
 
 def plot_results(freqs, fft):
