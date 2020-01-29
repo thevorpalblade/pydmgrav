@@ -21,15 +21,15 @@ BLACKLIST = [Path(i) for i in bl if (i != '') and (i[0] != "#")]
 
 
 # make fig3 function
-def make_fig3(path="fig3.data"):
-    fig3_x, fig3_y = np.loadtxt(path).T
-    fig3_x = fig3_x / 1000
-    amplitude = np.trapz(fig3_y, fig3_x)
-    return interp1d(fig3_x,
-                    fig3_y / amplitude,
+def make_fig3(path="deltag_result.txt"):
+    fig3_t, fig3_y = np.loadtxt(path).T
+    fig3_y = fig3_y * 1e9
+   
+    return interp1d(fig3_t,
+                    fig3_y,
                     fill_value=0,
                     bounds_error=False,
-                    kind="slinear")
+                    kind="linear")
 
 
 def load_file(path, minsize=100, dump_to_npy=False):
@@ -154,14 +154,13 @@ def do_fft_on_data(data,
                    inject_amplitude=None):
     if type(data) is not np.ndarray:
         data = np.load(data)
+
+    if inject_amplitude is not None:
+        data[:, 1] = data[:, 1] + inject_amplitude * fig3_f(data[:, 0] - data[0, 0]) / 2
+
     timestep = data[1, 0] - data[0, 0]
     freqs = np.fft.rfftfreq(len(data), timestep)
     fft = np.fft.rfft(data[:, 1])
-
-    if inject_amplitude is not None:
-        # fft = fft + lorentzian(freqs, inject_amplitude, 0.05435, 1 / 3300)
-        fft = fft + inject_amplitude * fig3_f(freqs)
-
     psd = (timestep**2) * (np.abs(fft)**2) / (data[-1, 0] - data[0, 0])
     # interpolate the spectra so we can average them properly later
     interp_spectra = interp1d(freqs, psd)
