@@ -23,7 +23,7 @@ BLACKLIST = [Path(i) for i in bl if (i != '') and (i[0] != "#")]
 # make fig3 function
 def make_fig3(path="deltag_result.txt"):
     fig3_t, fig3_y = np.loadtxt(path).T
-    fig3_y = fig3_y * 1e9
+    fig3_y = fig3_y * 1e9 * 1e5
    
     return interp1d(fig3_t,
                     fig3_y,
