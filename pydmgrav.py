@@ -369,14 +369,14 @@ def dig_single_site(basedir):
         print(np.std(psd[mask]))
 
 
-def rchisqr(r, p):
-    residuals = split_lor(r[0], *p) - r[1]
-    chisqr = np.sum((residuals / r[2]) ** 2)
+def rchisqr(r, p, mask):
+    residuals = split_lor(r[0][mask], *p) - r[1][mask]
+    chisqr = np.sum((residuals / r[2][mask]) ** 2)
     return chisqr / (len(r[0]) - len(p))
 
 
 def do_injection():
-    inject_amplitudes = np.logspace(np.log(.00005), np.log(.005), 20, base=np.e)
+    inject_amplitudes = np.logspace(np.log(.001), np.log(10), 20, base=np.e)
     rs = [main_npy(inject_amplitude=i) for i in inject_amplitudes]
     p0 = [7.31462455e-05,  5.09127562e-07,  3.03933293e-04, -8.39103118e+04, 3.92960778e+01]
     ps = []
@@ -385,7 +385,8 @@ def do_injection():
         mask = (r[0] > .000275) * (r[0] < .000325)
         p, cov = curve_fit(split_lor, r[0][mask], r[1][mask], p0=p0, sigma=r[2][mask])
         ps.append(p)
-        rcs.append(rchisqr(r, p))
+        rcs.append(rchisqr(r, p, mask))
+    import ipdb; ipdb.set_trace()
     return (ps, rcs)
 
 
